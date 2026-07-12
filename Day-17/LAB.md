@@ -91,11 +91,12 @@ This is the assigned hands-on activity — do it end to end.
              ports:
                - containerPort: {{ port | default(8080) }}
              env:
-             {% for key, value in env_vars.items() %}
-               - name: {{ key }}
-                 value: "{{ value }}"
-             {% endfor %}
+   {% for key, value in env_vars.items() %}
+             - name: {{ key }}
+               value: {{ value | tojson }}
+   {% endfor %}
    ```
+   Note the `| tojson` on the env value, not manual quotes (`"{{ value }}"`) — `tojson` correctly escapes/quotes whatever comes out of the YAML config, including values that could otherwise be misread as booleans (see Lab 1's Norway problem — an env var value of `DEBUG: on` must render as the literal string `"on"`, not get coerced).
 2. Create `configs/dev.yaml`:
    ```yaml
    app_name: diskcheck
@@ -105,11 +106,12 @@ This is the assigned hands-on activity — do it end to end.
      LOG_LEVEL: DEBUG
    ```
    and `configs/prod.yaml` with `replicas: 5`, `image: myregistry/diskcheck:v1.4.2`, `LOG_LEVEL: INFO`.
-3. Write `generate.py` that loads a config YAML, renders the template, and writes the result to a file — parameterize the config path via `click` (from Day 15) or plain `argparse`.
+3. Write `generate.py` that loads a config YAML and renders the template through an `Environment` configured with `trim_blocks=True, lstrip_blocks=True, undefined=StrictUndefined` — parameterize the config path via `click` (from Day 15) or plain `argparse`.
 4. Run it for both `dev.yaml` and `prod.yaml`, and diff the two generated manifests — confirm only the expected fields differ.
 5. Validate each generated manifest is actually parseable YAML by round-tripping it through `yaml.safe_load()` — this is the check that catches a template that "rendered" but produced broken YAML.
+6. Now delete the `replicas` key from `configs/dev.yaml` and re-run the generator. Confirm it raises `jinja2.exceptions.UndefinedError: 'replicas' is undefined` immediately, rather than rendering `replicas: ` (empty) and failing later, more confusingly, at the `yaml.safe_load()` step or inside Kubernetes itself. Then try it again with a plain `Environment(loader=...)` (no `undefined=StrictUndefined`) to see the silent-empty-string behavior for comparison, and restore the key afterward.
 
-**Success criteria:** Running the generator against both config files produces two valid, structurally-correct Kubernetes manifests differing only in the intended fields, and both pass a `yaml.safe_load()` round-trip.
+**Success criteria:** Running the generator against both config files produces two valid, structurally-correct Kubernetes manifests differing only in the intended fields, both pass a `yaml.safe_load()` round-trip, and you've directly observed `StrictUndefined` turning a missing-variable bug into an immediate, clear error instead of a silent blank field.
 
 ---
 

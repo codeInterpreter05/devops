@@ -33,7 +33,10 @@ list(yaml.safe_load_all(open("f.yaml")))   # multiple --- separated documents
 yaml.dump(data, default_flow_style=False)  # dict -> YAML text
 
 # NEVER on untrusted input:
-yaml.load(f, Loader=yaml.FullLoader)   # can construct arbitrary Python objects
+yaml.load(f, Loader=yaml.UnsafeLoader)   # or Loader=yaml.Loader — executes !!python/object/apply:... tags
+yaml.unsafe_load(f)                       # same risk, shorthand form
+# yaml.load(f) with no Loader= now raises TypeError (PyYAML 5.1+) instead of silently defaulting to unsafe
+# FullLoader blocks the code-exec tags but safe_load() is still the only recommended choice
 ```
 
 ## `ruamel.yaml` — round-trip preserving
@@ -73,9 +76,14 @@ except ValidationError as exc:
 ## Jinja2
 
 ```python
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-env = Environment(loader=FileSystemLoader("templates/"))
+env = Environment(
+    loader=FileSystemLoader("templates/"),
+    trim_blocks=True,       # eat the newline after a {% block %} tag
+    lstrip_blocks=True,     # eat leading whitespace before a {% block %} tag
+    undefined=StrictUndefined,   # raise UndefinedError on any missing variable, don't render ""
+)
 template = env.get_template("deployment.yaml.j2")
 output = template.render(app_name="diskcheck", replicas=3)
 ```
@@ -112,21 +120,44 @@ db_url = os.environ["DATABASE_URL"]
 ## `pydantic-settings`
 
 ```python
-from pydantic_settings import BaseSettings
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_", env_file=".env", env_nested_delimiter="__")
+
     database_url: str
     log_level: str = "INFO"
     max_retries: int = 3
-    model_config = {"env_prefix": "APP_", "env_file": ".env"}
+    api_key: SecretStr           # repr/str always show '**********', never the real value
 
-settings = Settings()   # raises ValidationError if required vars missing/wrong type
+settings = Settings()             # raises ValidationError if required vars missing/wrong type
+settings.api_key.get_secret_value()   # only way to get the real value back out
+```
+
+## Base + overlay merge (avoid duplicating YAML per environment)
+
+```python
+from copy import deepcopy
+
+def deep_merge(base: dict, override: dict) -> dict:
+    result = deepcopy(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+# {**base, **override} is WRONG here — it replaces nested dicts wholesale instead of merging them
 ```
 
 ## Config drift detection
 
 ```bash
 terraform plan                 # non-empty diff on unchanged .tf = drift
+driftctl scan                  # detects cloud resources unmanaged/drifted from Terraform state
+kubectl diff -f manifest.yaml   # shows what `apply` would change, without applying it
+argocd app diff <app>          # GitOps: live cluster state vs. git (Argo CD marks "OutOfSync")
+ansible-playbook site.yml --check --diff   # dry-run: reports drift from playbook's declared state
 aws configservice get-compliance-details-by-config-rule --config-rule-name <rule>
-argocd app diff <app>          # GitOps: live cluster state vs. git
 ```

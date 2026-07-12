@@ -18,5 +18,5 @@
 
 ## Practice
 
-- **Helm's chart template guide** (helm.sh/docs/chart_template_guide) — Helm's templating language is deliberately Jinja-like; working through their examples reinforces the same for/if/block mental model in a real-world tool.
+- **Helm's chart template guide** (helm.sh/docs/chart_template_guide) — a different engine (Go `text/template` + Sprig, not Jinja2), but the same template-plus-values-file mental model; working through their examples reinforces the pattern in a real-world tool with different syntax to compare against.
 - **jsonschema.net** — paste a sample JSON/YAML document and get a starter schema generated automatically, useful for quickly bootstrapping a schema for practice data.
