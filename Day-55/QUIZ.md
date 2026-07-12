@@ -1,0 +1,33 @@
+# Day 55 — Quiz: CKA Exam Prep II
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. Why is backing up etcd equivalent to backing up "the whole cluster," and what does *not* get lost even if etcd disappears?
+2. What's the difference between `ETCDCTL_API=2` and `=3`, and why must you set it explicitly?
+3. Why does `etcdctl snapshot status` not require `--cacert`/`--cert`/`--key` flags while `etcdctl snapshot save` does?
+4. Walk through what happens, mechanically, after you edit `/etc/kubernetes/manifests/etcd.yaml` to point at a restored data directory — what actually triggers the pod to restart?
+5. Why must Kubernetes cluster upgrades go one minor version at a time, and why must the control plane be upgraded before worker nodes?
+6. Why is `kubectl drain --ignore-daemonsets` necessary — what happens if you omit that flag?
+7. In NetworkPolicy, what does an empty `podSelector: {}` with no ingress rules under `policyTypes: [Ingress]` actually mean? Is that the same as no policy at all?
+8. When are NetworkPolicy objects completely inert, no matter how correct the YAML is?
+9. Explain the difference in scope between a Role bound via RoleBinding versus a ClusterRole bound via a namespace-scoped RoleBinding versus a ClusterRole bound via a ClusterRoleBinding.
+10. What identity does a pod use to talk to the Kubernetes API server by default, and how has token issuance changed since Kubernetes 1.24?
+11. If `kubectl get pods` returns nothing and you suspect the API server itself is down, what tool do you reach for instead, and why does it still work when `kubectl` doesn't?
+12. **Interview question:** What problems does Istio solve that Kubernetes doesn't? *(carried over as a general systems-thinking warm-up — see Day 57 for the full answer; for today, answer instead:)* Walk an interviewer through exactly how you would recover a cluster from a corrupted etcd, start to finish, as if this happened in production at 2am.
+
+---
+
+## Answers
+
+1. etcd holds every Kubernetes object — Deployments, Secrets, ConfigMaps, RBAC bindings, everything created via the API. Lose etcd and there's no record of desired state, so nothing can be reconciled/scheduled/healed. What does *not* disappear: already-running containers on nodes keep running (kubelet supervises them independently), but you can't scale, update, or recover them through Kubernetes anymore.
+2. v2 and v3 are different etcd APIs with incompatible command syntax and separate keyspaces; Kubernetes has used v3 exclusively for years, but `etcdctl` binaries often still default to v2 for backward compatibility, so an unset `ETCDCTL_API` can silently run v2 commands that don't touch the actual cluster data at all.
+3. `snapshot status` reads a local `.db` file on disk and reports its embedded metadata (hash, revision, key count) — no network call to the live cluster is involved. `snapshot save` and `restore`-against-a-live-endpoint operations talk to etcd's secured gRPC port, which requires the CA/cert/key for mTLS.
+4. The kubelet on that node runs a **static pod** watcher on `/etc/kubernetes/manifests/` — any file change there (via inotify-style watching/polling) causes the kubelet to tear down and recreate the corresponding pod using the new manifest content, with no `kubectl apply` or manual restart needed.
+5. Kubernetes only guarantees API compatibility, feature-gate behavior, and deprecation handling across one minor version boundary at a time; skipping versions risks broken CRDs/webhooks that assumed intermediate steps happened. Workers must never run a newer kubelet than the API server per the version-skew policy, so control plane goes first to stay the newest component.
+6. DaemonSet-managed pods are intentionally scheduled on every node including the one being drained, and the scheduler will never move them elsewhere — attempting a normal eviction fails/hangs, so the flag tells `drain` to simply ignore (not evict) those specific pods.
+7. It means default-deny for ingress traffic to every pod in the namespace (the empty selector matches all pods) — the opposite of no policy. With zero NetworkPolicy objects present, traffic is fully open; the moment any policy selects a pod for a direction, that direction becomes deny-by-default unless explicitly allowed.
+8. When the cluster's CNI plugin doesn't implement NetworkPolicy enforcement — plain Flannel is the classic example. The API object is accepted and stored in etcd like any other object, but nothing in the data plane reads or acts on it, so traffic flows as if no policy existed.
+9. Role + RoleBinding: permissions apply only inside that RoleBinding's namespace, using rules defined in that namespace's Role. ClusterRole + namespace-scoped RoleBinding: same effective scope (one namespace) but reuses a cluster-wide-defined permission set (e.g., built-in `view`/`edit`/`admin`) without duplicating YAML per namespace. ClusterRole + ClusterRoleBinding: permissions apply across **all** namespaces cluster-wide.
+10. Pods authenticate as their **ServiceAccount** (default one if unspecified). Since Kubernetes 1.24, ServiceAccounts no longer get a long-lived Secret token auto-created; tokens are short-lived, audience-bound, and projected into the pod at runtime via the `TokenRequest` API — durable tokens now require an explicit `kubectl create token` request.
+11. `crictl ps -a` / `crictl logs` — these talk directly to the container runtime via the CRI (Container Runtime Interface), completely bypassing the Kubernetes API server, so they still work even when the control plane itself is crash-looping or unreachable. `journalctl -u kubelet` is the complementary tool for kubelet-specific issues since kubelet runs as a systemd unit, not a static pod.
+12. Strong answer outline: "First, don't panic-restore over the live data directory — that risks making things worse. Check `etcdctl endpoint health` and `member list` to confirm the actual failure mode (single member down vs. quorum loss vs. data corruption). If it's a single member in a multi-node etcd cluster, remove and re-join that member rather than restoring. If it's full data loss/corruption with no healthy quorum, restore the most recent verified snapshot into a fresh data directory, repoint the static pod manifest's hostPath, let the kubelet recreate the pod, then validate with `kubectl get nodes`, `kubectl get pods -A`, and spot-check that recently-changed objects (the ones most likely to be missing if the snapshot is stale) are present — and communicate the snapshot's age/potential data loss window to the team immediately, since anything created after that snapshot is gone."

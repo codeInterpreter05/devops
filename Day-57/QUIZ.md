@@ -1,0 +1,33 @@
+# Day 57 — Quiz: Service Mesh Intro
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. Name the three cross-cutting problems a service mesh solves that plain Kubernetes `Service`/`Deployment` objects don't address at all.
+2. What are the two halves of Istio's architecture, and what specifically does each one do?
+3. What is the xDS API, and why does it matter that Envoy is configured through it rather than via static config files and restarts?
+4. What gives Istio's mTLS its "workload identity" property, beyond just encrypting traffic?
+5. What's the division of labor between `DestinationRule` and `VirtualService`? Which one defines subsets, and which one routes to them?
+6. Is a 90/10 weighted `VirtualService` split applied per TCP connection or per request — and why does that distinction matter for a single user's experience?
+7. In a `VirtualService` with multiple `http` match blocks, what determines which rule wins for a given request, and what's the consequence of ordering the catch-all rule first?
+8. What does Istio's `outlierDetection` do, and what everyday term is it the mesh equivalent of?
+9. Name two concrete architectural/philosophical differences between Linkerd and Istio.
+10. List three signals that a team should NOT adopt a service mesh yet.
+11. What extra latency/resource cost does the sidecar pattern impose on every request, mechanically?
+12. **Interview question:** What problems does Istio solve that Kubernetes doesn't? What is the performance overhead?
+
+---
+
+## Answers
+
+1. (a) Cross-service observability (latency/error metrics/tracing without per-language instrumentation code), (b) mTLS and zero-trust networking between pods (plaintext by default otherwise), (c) traffic management beyond basic load balancing — canary/weighted routing, circuit breaking, retries/timeouts, fault injection — none of which a `Service` object can express.
+2. The **control plane** (`istiod`) — service discovery, pushing Envoy config via xDS, acting as the certificate authority, and validating mesh CRDs — and the **data plane** (Envoy sidecars injected into every pod) — the actual traffic interception, load balancing, retries, and metrics emission.
+3. xDS is Envoy's gRPC-based dynamic configuration/discovery protocol (listener/route/cluster/endpoint discovery). Because Envoy is configured through xDS rather than static files, `istiod` can push new routing/mTLS/policy config to every running sidecar live, with no restarts and no pod disruption — this is what makes live canary shifts and policy changes possible without redeploying anything.
+4. Each sidecar's mTLS certificate is issued by `istiod`'s CA and tied to the pod's Kubernetes **ServiceAccount** identity — so both ends of a connection cryptographically prove *which service* they are, not just that the channel is encrypted. This is what enables real authorization policies like "only the `checkout` ServiceAccount may call `payments`," not just confidentiality.
+5. `DestinationRule` defines **subsets** (usually keyed off a `version` label) and per-subset traffic policy (connection pools, load-balancing algorithm, circuit breaking via `outlierDetection`). `VirtualService` defines the **routing rules** that decide which subset a given request is sent to (by weight, header match, path match, etc.). A `VirtualService` referencing a subset that no `DestinationRule` defines is broken/ineffective.
+6. Per request, by default — a weighted split is evaluated on each individual request, not pinned for the life of a connection. This means a single user making multiple requests can see responses from different subsets across those requests; true session affinity requires explicitly configuring consistent-hash-based load balancing on top.
+7. Match rules are evaluated **top to bottom, first match wins** within a `VirtualService`'s `http` list. If the catch-all (no-`match`) rule is placed first, it will match every request before any more-specific header/path rule below it ever gets evaluated, silently making those specific rules dead/unreachable.
+8. It ejects a backend instance from the load-balancing pool after it returns a configured number of consecutive errors (e.g., 5 consecutive 5xxs), for a cooldown period, before gradually letting it back in — this is the mesh's implementation of the **circuit breaker** pattern.
+9. Any two of: Linkerd uses its own lightweight Rust micro-proxy instead of Envoy; Linkerd enables mTLS by default with minimal configuration versus Istio's more explicit `PeerAuthentication` setup; Linkerd historically used the SMI `TrafficSplit` standard instead of inventing custom CRDs; Linkerd's install/upgrade path is deliberately simpler and narrower in feature scope than Istio's.
+10. Any three of: fewer than roughly 5-10 interdependent services (coordination pain hasn't materialized yet); no actual need for mTLS or fine-grained traffic control (workloads in a single trusted network, no canary requirements); no platform engineering capacity to operate and upgrade the mesh's control plane and sidecars; a narrower tool (API gateway, cert-manager, shared client library) already solves the specific problem you have.
+11. Every request now crosses **two extra proxy hops**: the caller's own Envoy sidecar on egress, and the callee's Envoy sidecar on ingress — each hop adds serialization/processing latency and each sidecar container consumes its own CPU/memory allocation per pod, multiplied across every pod in the mesh, whether or not that pod is actively handling heavy traffic.
+12. Strong answer: "Kubernetes handles scheduling, restarts, and basic Service-level load balancing, but it has no native concept of mTLS between pods, no cross-service request-level observability, and no traffic-shaping primitives like weighted canary splits, circuit breaking, or fault injection — a plain Service just round-robins across healthy endpoints. Istio adds all of that uniformly via sidecar Envoy proxies configured by a central control plane (istiod), so application teams get consistent security and traffic control without writing it into every service in every language. The cost is real: every request crosses two extra proxy hops (client and server sidecar), typically adding low-single-digit-to-tens of milliseconds of latency depending on payload size and enabled features, plus a meaningful per-pod memory/CPU overhead for every sidecar running in the cluster, and additional operational burden (control-plane upgrades, injection webhook failure modes). It's the right tradeoff once you have enough services that cross-cutting concerns can't be solved consistently per-team anymore — not a default for every cluster."

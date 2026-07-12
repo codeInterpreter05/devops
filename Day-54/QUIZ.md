@@ -1,0 +1,33 @@
+# Day 54 — Quiz: CKA Exam Prep I
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. Roughly how many performance-based tasks does the CKA exam have, how long is it, and what's the current passing threshold? Why should you confirm these numbers yourself before your actual sitting?
+2. Are all 17 tasks worth the same number of points? What's the strategic implication of the answer?
+3. What documentation are you allowed to reference during the exam, and what are you explicitly not allowed to do?
+4. Why does "skip and flag" beat "get it perfect before moving on" as an exam-time strategy?
+5. What's the very first thing you should check at the start of every new task, and why does skipping it risk scoring zero on an otherwise-correct answer?
+6. What does `kubectl run mypod --image=nginx --dry-run=client -o yaml > pod.yaml` actually do, and why is this faster/safer than typing the YAML by hand?
+7. Why specifically `--dry-run=client` rather than `--dry-run=server` for generating a starting-point manifest?
+8. Name two `kubectl` commands that let you change a single field on a live object without opening `kubectl edit` at all.
+9. Why is `kind` (Kubernetes-in-Docker) particularly well suited to CKA drilling, and why is a multi-node `kind` config more useful for this exam than a single-node default cluster?
+10. What is killer.sh, how many free sessions come with a CKA exam purchase, and why shouldn't a mediocre score on it be taken as proof you're not ready for the real exam?
+11. What's a sensible way to sequence your two killer.sh sessions relative to your actual exam date, and why?
+12. **CKA self-assessment question (no interview question was assigned for today — this row's prep is exam-format-focused, not interview-focused):** If you had exactly 7 minutes left and 3 unattempted tasks worth different point values remaining, what's your decision process for how to use the remaining time?
+
+---
+
+## Answers
+
+1. Roughly 17 performance-based tasks, about 2 hours total, and a 66% passing threshold at present. You should confirm these yourself because CNCF/Linux Foundation has adjusted exact task counts, timing, and passing thresholds across exam versions before, and studying stale numbers could lead to miscalibrated time-management expectations on the actual day.
+2. No — tasks are explicitly not equally weighted; some are worth substantially more than others. Strategically, this means time and effort should be allocated proportional to a task's point value (as reflected in the published curriculum domain weightings), not proportional to how familiar or interesting a task feels.
+3. You're allowed one browser tab restricted to `kubernetes.io/docs`, `kubernetes.io/blog`, and the Kubernetes GitHub organizations (`github.com/kubernetes`, `github.com/kubernetes-sigs`). You are not allowed general internet search, Stack Overflow, personal notes, or any other browser tab.
+4. Because the exam is time-boxed with unequal task weighting — spending disproportionate time perfecting one difficult task risks not even attempting other, potentially higher-value tasks. Flagging a stuck task and returning to it later (if time permits) protects your overall score better than tunnel-visioning on a single problem.
+5. Confirming you're operating against the correct cluster/context (e.g., via `kubectl config current-context` or following the task's provided context-switch instructions). Solving a task perfectly against the wrong cluster still scores zero, since grading checks the specific cluster the task designates.
+6. It generates a Pod manifest locally (client-side, without contacting the API server for validation) and prints it as YAML, redirected to a file — giving you a correct, complete starting template to edit rather than requiring you to type the entire manifest structure (apiVersion, kind, metadata, spec nesting) from memory, which is both slower and more error-prone under time pressure.
+7. `--dry-run=client` never contacts the API server at all — it's purely local and fast, and isn't affected by cluster-side admission webhooks or validation that could slow it down or alter the output unexpectedly. `--dry-run=server` does contact the API server (to validate as if it were really being created) and is slower and less predictable for the specific purpose of generating a quick starting template.
+8. `kubectl set image deployment/<name> <container>=<newimage>` (change just the image) and `kubectl scale deployment/<name> --replicas=<n>` (change just the replica count) — both avoid opening `kubectl edit` and manually modifying YAML for a single-field change.
+9. `kind` runs Kubernetes nodes as Docker containers, letting you create and tear down multi-node clusters in under a minute with no cloud cost — ideal for the high-repetition, timed drilling CKA prep demands. A multi-node config (control-plane + multiple workers) better mirrors exam scenarios involving cluster-architecture tasks (cordon/drain, node-level troubleshooting, node selectors/taints) than a single-node default cluster would.
+10. killer.sh is the official CKA exam simulator, built by the same organization delivering the real exam, and every CKA exam purchase includes two free sessions (36 hours of access each, once activated). A mediocre score shouldn't be treated as proof of unreadiness because killer.sh's own creators deliberately calibrate its scenarios to be harder than the actual CKA exam.
+11. Use the first session early (after finishing the curriculum) as a cold, honest, timed baseline to discover real gaps, review every solution thoroughly, drill on `kind` to close those gaps, then use the second session shortly before the actual exam date to confirm the gaps are closed and build exam-day confidence — since both sessions are time-boxed once activated, you don't want to "waste" your second look at the real interface before you've actually improved.
+12. Strong answer: "I'd first check each remaining task's point weight/curriculum domain if visible, and prioritize whichever is worth the most points relative to how quickly I believe I can solve it — a high-value task I'm fairly confident about beats a low-value task even if the low-value one feels 'almost done.' If none are quick wins, I'd take the one where I can get partial credit fastest (e.g., getting the object created correctly even if I can't perfect every sub-requirement) rather than risk zero credit on all three by splitting time evenly and finishing none. I would not spend the full 7 minutes chasing a perfect solution on one task at the total exclusion of attempting the others, since a partially correct attempt on multiple tasks generally beats a perfect attempt on only one when time actually runs out."

@@ -1,0 +1,33 @@
+# Day 56 — Quiz: Terraform Associate Exam Prep
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. What does `terraform.tfstate` actually store, and why can't Terraform operate correctly without it?
+2. You rename a resource block from `aws_instance.web` to `aws_instance.web_server` and run `terraform apply` directly. What happens, and how would `terraform state mv` change the outcome?
+3. What's the difference between `terraform state rm` and `terraform destroy` for a given resource?
+4. Why does a remote backend like S3 + DynamoDB matter for teams, specifically in terms of what problem locking solves?
+5. Does marking a variable `sensitive = true` encrypt or remove it from the state file? What does it actually do?
+6. After running `terraform import`, why is it critical to immediately run `terraform plan`, and what could go wrong if you skip that step?
+7. What's the practical difference between legacy `terraform taint` and `terraform apply -replace=...`?
+8. What does `terraform validate` check, and what class of errors can it never catch, no matter how thorough your HCL is?
+9. What are Terraform Cloud/Enterprise's three enforcement levels for Sentinel policies, and why would you deliberately start a new policy at the lowest one?
+10. Name three capabilities Terraform Cloud provides that plain open-source Terraform CLI does not have built in.
+11. What does `terraform_remote_state` let you do, and why is it the standard pattern for splitting infrastructure into layers?
+12. **Interview question (state management focus):** A teammate accidentally ran `terraform apply` from their laptop against the same workspace you were mid-`apply` on, using local (non-locked) state. Walk through what could go wrong and how you'd prevent it going forward.
+
+---
+
+## Answers
+
+1. It stores the mapping between HCL resource addresses and real-world object IDs/attributes, plus metadata Terraform needs for dependency tracking. Without it, Terraform has no record that `aws_instance.web` corresponds to a specific already-created instance — every plan would treat all resources as new, and applying would likely fail with "already exists" errors from the provider since the real resources still exist.
+2. Terraform sees `aws_instance.web` disappear and `aws_instance.web_server` as new — from its perspective these are unrelated resource addresses, so `apply` destroys the old instance and creates a new one. `terraform state mv aws_instance.web aws_instance.web_server` instead relabels the existing tracked object to the new address with no real-world change; the next `plan` shows no diff.
+3. `terraform state rm` only stops Terraform from tracking the resource — the real object keeps running/existing, now unmanaged. `terraform destroy` (or destroying a specific resource) actually deletes the real-world object via the provider API.
+4. Locking prevents two concurrent `apply` runs from writing state at the same time, which could corrupt the state file or cause conflicting real-world changes (e.g., both runs trying to modify the same resource based on stale reads). The lock record (in DynamoDB, or natively in S3 1.10+) makes a second concurrent run fail fast with a clear "state is locked" error instead of racing silently.
+5. Neither — `sensitive = true` only suppresses the value from being printed in CLI plan/apply output. The raw value is still stored in plain text inside the state file; protecting it requires backend-level encryption at rest (e.g., S3 with SSE, or TFC/TFE's server-side encryption) and restricting who can read the state.
+6. `import` only populates Terraform's *state* with the real object's attributes — it does not write or update your HCL configuration to match. If your HCL is incomplete or wrong (e.g., missing a tag the real resource actually has), the next `apply` will try to reconcile the real resource to match your incorrect HCL, potentially making unwanted destructive changes to a resource you just tried to bring safely under management.
+7. Legacy `taint` mutates state immediately when you run it — the resource is marked for replacement with no preview step, and the destroy+recreate happens on the very next `apply` with no chance to review it as a plan first. `-replace="<addr>"` is a flag on `plan`/`apply` itself — the proposed replacement shows up in normal plan output for review, consistent with Terraform's "always show a plan" workflow, which is why it replaced `taint` as the recommended approach.
+8. `validate` checks HCL syntax, internal type consistency, and that referenced variables/resources/outputs actually exist — entirely locally, with no calls to any provider and no cloud credentials required. It cannot catch anything that depends on the real provider state or API — invalid AMI IDs, insufficient IAM permissions, resource naming conflicts, quota limits — those only surface during `plan`/`apply`, which do query the provider.
+9. Advisory (logs a warning, never blocks anything), soft-mandatory (blocks the apply, but a sufficiently privileged/authorized user can override it), and hard-mandatory (blocks unconditionally with no override). You'd start a brand-new policy at advisory so you can observe, across real runs, what it *would* have blocked — without breaking anyone's pipeline — before tightening it once you're confident it's correctly scoped.
+10. Any three of: built-in remote state storage with locking; remote plan/apply execution (runs happen on HashiCorp's infrastructure, not your laptop/CI runner); VCS-driven runs (push-to-plan, plan-as-PR-comment); Sentinel/OPA policy-as-code (paid tiers); team-based RBAC and SSO (paid tiers); a private module/provider registry.
+11. It's a data source that reads another Terraform configuration's **outputs** directly from its remote state backend — letting you split a large infrastructure into independently-applied layers (e.g., `network` state, `compute` state) where the dependent layer (`compute`) can consume values (like a subnet ID) produced by the upstream layer (`network`) without duplicating resource definitions or hardcoding IDs.
+12. Without locking, both `apply` runs can read the same starting state, compute independent diffs, and write conflicting results back — the file itself can be corrupted (last writer wins, silently discarding the other run's changes) or, worse, both runs could partially succeed against real infrastructure in an inconsistent way (e.g., one modifies a security group while the other is mid-destroy of a dependent resource). The fix is a properly configured remote backend with locking (S3+DynamoDB, TFC/TFE, or any backend that implements state locking) so a second concurrent `apply` fails fast with a "state is locked" error instead of racing.

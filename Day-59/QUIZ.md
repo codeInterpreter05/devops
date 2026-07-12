@@ -1,0 +1,33 @@
+# Day 59 — Quiz: Phase 1 Mock Interview Day
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. What are the four typical parts of a structured DevOps/platform engineering interview, in order?
+2. What does the STAR format stand for, and why does the "Result" component specifically need to be concrete?
+3. In a system design interview, what should you do before naming any specific technology, and why do interviewers treat this as a positive signal rather than stalling?
+4. Name the three points on the EKS multi-tenancy isolation spectrum, from cheapest to most isolated, and one tradeoff of each.
+5. List three concrete Kubernetes-level mechanisms (not just "isolation") you'd name when describing namespace-per-tenant isolation.
+6. Why is data-layer isolation a separate decision from compute isolation, and what's one concrete data-layer isolation approach?
+7. In a crash-loop debugging scenario, why is `kubectl logs <pod> --previous` often more useful than `kubectl logs <pod>` without the flag?
+8. What does exit code 137 typically indicate, and what would you check next after seeing it?
+9. Why should you avoid immediately running `terraform force-unlock` when you see a "state lock could not be acquired" error?
+10. What are two root causes of a Terraform plan unexpectedly proposing to destroy-and-recreate a resource after a seemingly trivial HCL change?
+11. Why is narrating your hypothesis before running a diagnostic command considered more important, from an interviewer's perspective, than arriving at the correct final answer quickly?
+12. **Interview question (system design, verbatim from today's assignment):** Design a multi-tenant SaaS platform on EKS with tenant isolation.
+
+---
+
+## Answers
+
+1. Behavioral/background, system design, hands-on/scenario debugging, and your own questions for the interviewer.
+2. Situation, Task, Action, Result. The Result needs to be concrete (a number, a duration, an outcome) because a vague conclusion ("and it worked out well") gives the interviewer nothing to calibrate the actual impact of your action against — a specific result is what makes the story verifiable and memorable.
+3. You should ask clarifying questions about scale, tenant shape, and compliance/isolation requirements before naming any specific technology. Interviewers treat this positively because it demonstrates you understand that the "right" architecture is contingent on requirements that were never stated up front — jumping straight to a tool choice suggests either inexperience or a memorized answer rather than live reasoning.
+4. Namespace-per-tenant (cheapest/fastest, but shares the node kernel so a node-level compromise or noisy-neighbor issue can cross tenant boundaries), node-pool-per-tenant (stronger resource-contention isolation via taints/affinity, still shares the control plane/network fabric), and cluster-per-tenant (strongest isolation via a fully separate control plane, but highest cost and operational overhead — reasonable only for a small number of large/regulated tenants).
+5. Any three of: `ResourceQuota`/`LimitRange` per namespace (caps CPU/memory/object counts so one tenant can't exhaust the cluster), default-deny `NetworkPolicy` between tenant namespaces, per-tenant IAM roles via IRSA (scoping a tenant's workload to only its own cloud resources), and Pod Security Standards/admission control (blocking privilege escalation).
+6. Namespace/RBAC/NetworkPolicy isolation only governs the Kubernetes compute layer — it says nothing about whether tenants' data is actually separated in the database/storage layer, which is a distinct architectural decision. One concrete approach: per-tenant schema or row-level security in a shared RDS instance, or a tenant-ID partition key in DynamoDB combined with IAM condition keys scoping each tenant's access to only its own partition.
+7. When a container crashes, the *current* running container instance may be too new to have logged the actual failure yet (it may be in an early restart, not yet crashed again) — `--previous` retrieves the logs from the last terminated instance, which usually contains the actual error/stack trace that caused the crash.
+8. Exit code 137 corresponds to SIGKILL, most commonly issued by the kubelet when a container is OOMKilled (exceeds its memory limit). The next check would be comparing actual memory usage (`kubectl top pod`) against the configured `resources.limits.memory`, and reviewing whether the limit is too low or the application has a genuine memory leak/spike.
+9. `force-unlock` bypasses the exact safety mechanism (state locking) designed to prevent two concurrent runs from corrupting state or making conflicting real-world changes. Running it without first confirming no other `apply`/`plan` is genuinely still in progress risks causing the very corruption the lock exists to prevent — it should only be used after confirming the lock is stale (e.g., from a crashed CI job), not as a default first response to the error.
+10. Any two of: a change to an attribute that's immutable/force-new for that resource type (e.g., certain engine version changes on RDS), a resource rename in HCL without a corresponding `terraform state mv` (which makes Terraform see it as a brand-new address unrelated to the old one), or a change to an attribute that's part of that provider's identifying key for the resource.
+11. Because the reasoning process — forming a hypothesis, choosing the diagnostic step that would confirm or rule it out, and adjusting based on what's observed — is what predicts how someone will actually perform on a real, novel production incident where the "correct command" isn't already known in advance; arriving at a right answer via memorized steps with no visible reasoning doesn't generalize to situations the candidate hasn't seen before.
+12. Strong answer outline: clarify tenant count/shape and whether isolation is compliance-driven; state a hybrid isolation model (namespace-per-tenant by default, with a dedicated node-pool or dedicated-cluster tier available for large/regulated tenants); name concrete compute-level mechanisms (ResourceQuota/LimitRange, default-deny NetworkPolicy, IRSA-scoped IAM per tenant, Pod Security Standards); address data-layer isolation explicitly and separately (e.g., tenant-ID partition key + IAM condition keys, or per-tenant schema/row-level security); describe an automated tenant-onboarding control plane that provisions namespace+quota+RBAC+IAM together rather than by hand; and close by naming concrete tradeoffs (cost per tenant, blast radius of a cluster-level incident, and the trigger conditions — e.g., a compliance requirement — that would move a specific tenant to a more isolated tier).
