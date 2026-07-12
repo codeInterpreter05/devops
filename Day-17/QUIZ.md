@@ -1,0 +1,33 @@
+# Day 17 — Quiz: YAML / JSON / Config Parsing
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. Why does `country: NO` in a YAML file parse as a boolean instead of the string "NO"? How do you prevent it?
+2. What's the difference between `yaml.safe_load()` and `yaml.safe_load_all()`, and what actually happens if you call `safe_load()` on a multi-document stream?
+3. Why is bare `yaml.load()` (without specifying `Loader=`) dangerous on untrusted input? What's the safe alternative?
+4. What problem does `ruamel.yaml` solve that plain PyYAML doesn't, and when would you actually need it?
+5. What does setting `additionalProperties: False` in a JSON Schema catch that a schema without it would miss?
+6. In Jinja2, what's the difference between `{{ }}`, `{% %}`, and `{# #}`?
+7. What's the difference between Jinja2's `{% extends %}`/`{% block %}` and `{% include %}`?
+8. Why can a Jinja2 template render "successfully" and still produce invalid YAML? How do you guard against this?
+9. What does `pydantic-settings` give you that plain `os.environ.get("KEY", "default")` scattered through a codebase does not?
+10. Why should `.env` files and `python-dotenv` never be the mechanism config reaches staging/production?
+11. What is "config drift," and why does detecting it require a continuously running check rather than a one-time review?
+12. **Interview question:** How do you manage application configuration across dev/staging/prod without duplicating YAML?
+
+---
+
+## Answers
+
+1. YAML 1.1 (what PyYAML implements) treats certain unquoted words — `y`/`yes`/`n`/`no`/`true`/`false`/`on`/`off` in various cases — as boolean literals, not strings. `NO` is Norway's ISO country code, hence "the Norway problem." Fix: quote the value explicitly, `country: "NO"`.
+2. `safe_load()` expects exactly one document in the stream — if it encounters a second `---`-separated document, it raises `yaml.composer.ComposerError: expected a single document in the stream` rather than silently returning just the first one. `safe_load_all()` returns a generator over every document in the stream. Using `safe_load()` on a multi-document Kubernetes manifest (Deployment + Service in one file) fails loudly with `ComposerError`, which is at least a safe failure mode — but it's still a common "worked on my single-resource test file, blew up on the real manifest" surprise if you didn't expect the file to have multiple documents.
+3. Bare `yaml.load()` without a restrictive loader can, via tags like `!!python/object:...`, construct arbitrary Python objects during parsing — on untrusted YAML this is a remote-code-execution vector, similar in severity to `pickle.loads()` on untrusted bytes. `yaml.safe_load()` restricts construction to plain data types (dict/list/str/int/float/bool/None) and is the only version that should touch untrusted input.
+4. PyYAML's `load()`/`dump()` round-trip strips comments and can reorder/reformat a file. `ruamel.yaml` preserves comments, key order, and formatting on round-trip. You need it specifically when writing a tool that programmatically edits an existing, human-maintained YAML file (e.g., bumping one value in a Helm `values.yaml`) without destroying everything else a person wrote in that file.
+5. Without `additionalProperties: False`, an unrecognized key — most often a typo like `replias` instead of `replicas` — is silently accepted as a harmless extra field instead of failing validation. With it set to `False`, any key not explicitly declared in the schema causes validation to fail loudly.
+6. `{{ }}` is an expression — it evaluates and inserts output. `{% %}` is a statement — it drives control flow (loops, conditionals, blocks) and produces no output itself. `{# #}` is a comment, stripped entirely from rendered output.
+7. `{% extends %}` + `{% block %}` establishes a parent/child relationship where a child template overrides specific named regions of a shared base template. `{% include %}` simply inlines another template's full content at that point, with no override mechanism — it's for straightforward reuse of a fixed snippet, not for structured overriding.
+8. Jinja2 has no awareness of YAML's syntax rules — it's a pure text templating engine. A substituted string containing a colon, or inserted without matching indentation, can produce text that renders without any Jinja2 error but is not valid YAML once parsed. Guard against it by piping risky values through `| tojson` (correctly quotes/escapes) and by validating the rendered output with `yaml.safe_load()` before trusting it.
+9. `pydantic-settings` gives typed, validated configuration defined once in a schema — it fails fast with a clear error at startup if a required variable is missing or the wrong type, and gives you real typed values (an actual `int`, not a string you must convert). Scattering `os.environ.get()` calls means every call site can assume a different type/default independently, and a missing/malformed variable typically fails later, deep in unrelated logic, with a much less clear error.
+10. Staging/production configuration should be injected by the deployment platform itself (Kubernetes env/envFrom, ECS task definitions, systemd `EnvironmentFile=`) as part of the deployment process, which is auditable, versioned in the deployment config, and doesn't depend on a file sitting on a filesystem. `.env` + `python-dotenv` is a local convenience for a single developer's machine and was never designed as a production configuration-delivery mechanism.
+11. Config drift is when a live, running system's actual configuration no longer matches what's declared in version control — caused by manual hotfixes, console changes, or out-of-band edits. It requires continuous checking (a scheduled `terraform plan`, a GitOps controller's reconciliation loop, AWS Config rules) because drift can occur at any time between deploys, not just at deploy time — a one-time audit only catches drift that happens to exist at the moment you look.
+12. Strong answer: "I keep one canonical schema or template describing the *shape* of configuration, and only the environment-specific values differ per environment — injected as environment variables validated through something like `pydantic-settings`, or as small overlay files merged onto a shared base (the Kustomize/Helm pattern), or as small per-environment data files rendered through one shared Jinja2 template. I never maintain three full, independently-edited copies of the same YAML file, because that's exactly the setup that causes environments to drift apart and copy-paste mistakes to go unnoticed."
