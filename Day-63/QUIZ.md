@@ -1,0 +1,33 @@
+# Day 63 — Quiz: GitLab CI Deep Dive
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. In GitLab CI, do jobs in the same `stage` run in parallel or sequentially? What about jobs in different stages?
+2. How does `needs:` change a job's execution timing relative to plain stage-based ordering?
+3. `rules:` is evaluated how — as independent conditions, or top-to-bottom with first-match-wins? Why does this matter for reordering rules?
+4. What happens to a job if none of its `rules:` entries match, and there's no catch-all `when:` at the end?
+5. What's the structural difference between `extends` and a YAML anchor (`&`/`<<: *`), and when does that difference actually matter (hint: `include:`)?
+6. When a child job using `extends` redefines a key (like `script`) that the parent template also defines, does GitLab merge/append the arrays or replace them?
+7. What are `$CI_REGISTRY`, `$CI_REGISTRY_IMAGE`, `$CI_REGISTRY_USER`, `$CI_REGISTRY_PASSWORD`, and why don't you need to configure them manually for basic registry access?
+8. Why does building a Docker image inside a GitLab CI job typically require Docker-in-Docker (`dind`), and what's the security downside of that approach? Name an alternative.
+9. What does a job's `tags:` list control, and what's the most common symptom when a job's tags don't match any available runner?
+10. Name three concrete syntax/concept mappings between GitHub Actions and GitLab CI (e.g., "X in GitHub is roughly Y in GitLab").
+11. What GitLab feature is the rough equivalent of a GitHub Environment's "required reviewer," and what's the caveat about who can approve without a paid-tier feature?
+12. **Interview question:** Compare GitHub Actions and GitLab CI. What are the key differences in syntax and features?
+
+---
+
+## Answers
+
+1. Jobs within the same stage run in **parallel**. Jobs in different stages run **sequentially** by default — the next stage only starts after every job in the current stage finishes (and, by default, none failed).
+2. `needs:` lets a job bypass waiting for its entire stage to complete — it starts as soon as the specific jobs it depends on (listed in `needs`) are done, creating a DAG-like pipeline instead of strict stage-blocking, which can significantly speed up pipelines where not every job in a stage needs to finish before a downstream job can start.
+3. Top-to-bottom, **first match wins** — it is not independent condition evaluation. This matters because reordering two rules can change which one actually applies to a given commit/pipeline, even though the individual `if:` conditions themselves didn't change.
+4. The job simply does not run at all in that pipeline — there is no implicit "runs by default" fallback. You must add an explicit catch-all rule (e.g., `- when: on_success` or `- when: never`) if you want defined behavior for the unmatched case.
+5. `extends` is GitLab-aware: it performs a deep merge with defined precedence, and works across files pulled in via `include:`. YAML anchors (`&`/`<<: *`) are plain YAML functionality with no GitLab-specific logic, and are scoped to a single YAML document — they do not work across separate files brought in via `include:`, because each included file is parsed as its own document.
+6. Arrays are **replaced wholesale**, not merged or appended — if a child overrides `script`, the parent's `script` (or `before_script`, etc., for that specific key) is fully replaced by the child's value, not concatenated.
+7. They are GitLab's predefined CI/CD variables automatically injected into every job, pointing at that project's built-in container registry and providing valid login credentials scoped to that pipeline run. You don't need to configure them manually because GitLab provisions the registry and its access automatically per-project — no separate registry account/secret setup required for basic push/pull from within the same project's pipeline.
+8. The `docker` CLI needs an actual Docker daemon to talk to, and a job's own container doesn't have one running inside it by default — the `docker:24-dind` service provides that daemon as a sidecar. The downside is `dind` typically requires privileged mode, a materially larger security attack surface (privileged containers can affect the host). Alternatives that avoid needing a daemon or privileged mode entirely: `kaniko` or `buildah`.
+9. `tags:` controls which runner(s) are eligible to pick up that job — a runner only picks up jobs whose tags are a subset of its own configured tags. The most common symptom of a mismatch is the job getting stuck in `pending` indefinitely, because no registered runner matches the required tag(s).
+10. Any three of: `stages` (GitLab, parallel-within-stage/sequential-across) roughly maps to GitHub's implicit parallel jobs ordered via `needs`; `rules:` maps to GitHub's `on`/`if` trigger and conditional logic; `extends`/shared templates map to GitHub's composite actions; `include:` of a shared project/template maps to GitHub's reusable workflows (`workflow_call`); GitLab CI/CD Variables (`$VAR`) map to GitHub's `secrets`/`vars` contexts; GitLab's built-in container registry has no single direct GitHub equivalent (GitHub Container Registry is a separate, non-default product).
+11. `environment:` combined with `rules: - when: manual` is the rough functional equivalent — the job pauses for a manual click before running. The caveat: without "protected environments" (a paid GitLab tier feature), any user with sufficient project role (e.g., Maintainer) can click to approve, not a specifically designated reviewer/approver list the way GitHub's required-reviewers works out of the box.
+12. Strong answer: "Both are stage/job-based pipelines defined as code, but GitLab CI centers on a single `.gitlab-ci.yml` (composable via `include:`) with `stages` that run sequentially by default (parallel within a stage), while GitHub Actions jobs are unordered by default and require explicit `needs` for sequencing. GitLab's `rules:` (first-match-wins, top-to-bottom) plays the role of GitHub's `on`/`if` conditions. Reuse differs too: GitLab uses `extends`/anchors/`include:`, GitHub uses composite actions and reusable workflows. GitLab ships a built-in container registry and native deploy boards per project at no extra setup; GitHub Actions leans on its much larger Marketplace ecosystem and separate registry products. Practically, the concepts map closely enough that migrating between them is mostly a syntax translation exercise, and the choice in practice often comes down to whether the org is already on GitLab (common in self-managed/regulated environments) or GitHub."

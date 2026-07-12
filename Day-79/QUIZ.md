@@ -1,0 +1,33 @@
+# Day 79 — Quiz: Runtime Security
+
+Try to answer without looking at your notes. Answers are at the bottom.
+
+1. Why can't pre-deploy scanning (SAST, dependency scanning, image scanning) catch what runtime security tools like Falco catch?
+2. What is eBPF, and why is it lower-overhead than older approaches like `strace`/`auditd` for kernel-level visibility?
+3. Walk through Falco's architecture in three layers, from raw kernel event to alert.
+4. In the default "Terminal shell in container" rule, what does the condition `proc.tty != 0` actually detect, and why is that the key signal?
+5. What's the difference between what seccomp restricts and what AppArmor restricts?
+6. What does `seccompProfile.type: RuntimeDefault` actually do, and how is it different from a `Localhost`-type profile?
+7. What is Mandatory Access Control, and why can AppArmor deny access to a file even if its Unix permission bits allow it?
+8. What are the two independent knobs in a Kubernetes audit policy rule, and what does each control?
+9. Which Kubernetes API subresource does a `kubectl exec` request show up as in the audit log, and which fields in that event does Falco's alert *not* give you?
+10. Why is immediately deleting a compromised pod usually the wrong first response step in an incident?
+11. After containing and collecting evidence in an incident, what specifically must be treated as compromised and rotated, regardless of proof it was misused?
+12. **Interview question:** How would you detect if someone exec'd into a production container and ran commands?
+
+---
+
+## Answers
+
+1. Pre-deploy scanning only evaluates the artifact (code, dependencies, image) as it exists *before* it runs — it can only catch **known** issues (known CVEs, known bad patterns) present in that static artifact. It cannot see zero-day exploits, a compromised credential being used maliciously, or genuinely unexpected live behavior — all of which only manifest once the workload is actually running, which is exactly the gap runtime tools like Falco are built to cover.
+2. eBPF lets small, kernel-verified programs run directly inside the kernel, attached to hook points (kprobes, tracepoints, LSM hooks), executed near-natively after JIT compilation. Older approaches like `strace`/`auditd`/`ptrace` require a context switch back into userspace for every observed event to be evaluated, which is comparatively slow — eBPF evaluates in-kernel, avoiding that per-event round trip, and its verifier makes it safe to run untrusted-looking logic in kernel space without the risk a hand-written kernel module would carry.
+3. (1) Instrumentation — an eBPF probe (or kernel module) collects raw syscall/kernel events from every process on the node. (2) The Falco engine in userspace (libscap/libsinsp) enriches each event with context — container, Kubernetes pod/namespace/labels, process tree. (3) Rules — declarative YAML conditions evaluated against the enriched event stream — fire an alert at a configured priority when matched.
+4. `proc.tty != 0` detects that the spawned process has an attached pseudo-terminal — the hallmark of an *interactive* session (like `kubectl exec -it` or `docker exec -it`), as opposed to a shell invoked non-interactively by a script as part of normal application behavior (which typically has no attached tty). It's the key signal because it distinguishes "someone is interactively typing commands right now" from routine automated shell usage.
+5. Seccomp restricts **which syscalls** a process is permitted to make to the kernel (an action-level restriction). AppArmor restricts **what files/paths and capabilities** a process can access (a resource-access restriction), enforced as Mandatory Access Control independent of and on top of Unix file permissions.
+6. `RuntimeDefault` applies the container runtime's built-in default seccomp profile, blocking roughly 40-plus syscalls broadly considered dangerous for containerized workloads (e.g., `mount`, `reboot`, `keyctl`), with essentially no compatibility cost for typical applications. `Localhost` instead points to a custom, hand-authored JSON profile file that must already exist on the node — allowing a much tighter, application-specific allow-list, at the cost of having to generate and maintain that profile yourself.
+7. Mandatory Access Control means access decisions are enforced by a system-wide policy the kernel checks independently of the resource owner's own permission settings — as opposed to Discretionary Access Control (standard Unix permissions), where the file owner controls access. AppArmor, as an LSM-based MAC system, can deny a process access to a file that's world-readable at the Unix-permission level because its policy check happens as a separate, additional gate that Unix permissions alone don't override.
+8. **Stage** (which point in a request's lifecycle to log — `RequestReceived`, `ResponseStarted`, `ResponseComplete`, `Panic`) and **level** (how much detail to capture per matched rule — `None`, `Metadata`, `Request`, `RequestResponse`).
+9. `pods/exec` (with verb `connect`). Falco's alert tells you a shell was spawned inside the container and gives you container/process context, but it does not give you the authenticated Kubernetes **user identity** or **source IP** that issued the API request — those fields (`user.username`, `sourceIPs`) come only from the audit log entry.
+10. Deleting the pod immediately destroys the compromised container's filesystem state and any in-memory/process evidence before you've captured logs, a filesystem snapshot, or correlated the timeline — this permanently loses forensic evidence needed to determine what actually happened and how the attacker gained access.
+11. Every credential the compromised pod had access to — its Kubernetes ServiceAccount token, any mounted Secrets, and any cloud IAM role/permissions it could assume — must be rotated/revoked, treated as compromised regardless of whether you can specifically prove they were exfiltrated or misused.
+12. Correlate two independent signals: a **Falco rule** matching an interactive shell spawned inside a container (`spawned_process and container and shell_procs and proc.tty != 0`), which is real-time behavioral detection from inside the workload; and the **Kubernetes API server audit log**, which records the `pods/exec` subresource request with verb `connect` and includes the authenticated `user.username` and `sourceIPs` that actually issued the exec. Falco tells you *that* a shell appeared; the audit log tells you *who* caused it and from where — together they give a complete, evidence-backed answer, which is stronger than naming either tool alone.
