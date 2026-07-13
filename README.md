@@ -31,7 +31,7 @@ Every README file follows the same internal shape: a **Brief** (what it is, why 
 | 3 | Observability | Metrics, Logging, Tracing, SRE principles, On-call practices | Prometheus · Grafana · Loki · OpenTelemetry · Jaeger · PagerDuty | Days 89–109 | 📌 AWS SAA-C03 |
 | 4 | Advanced / Spec. | Service mesh, Platform eng, FinOps, MLOps, Advanced security, Multi-cloud | Istio · Crossplane · Backstage · Kubecost · Kubeflow · Kyverno | Days 110–150 | 📌 CKS |
 
-> **Status:** Phases 0–3 (Days 1 through 101-109) are complete. Phase 4 (Days 110–150) is in progress and will be added in a follow-up pass.
+> **Status:** All 5 phases (Days 1 through 141-150) are complete.
 
 ---
 
@@ -149,9 +149,24 @@ Every README file follows the same internal shape: a **Brief** (what it is, why 
 | [Day-100](Day-100/) | W17 | Datadog / New Relic (Commercial Tools) | |
 | [Day-101-109](Day-101-109/) | W17-W18 | Phase 3 Project + AWS SAA-C03 Prep | 📌 |
 
-## Phase 4 — Advanced / Specialization (Days 110–150) — _coming soon_
+## Phase 4 — Advanced / Specialization (Days 110–150)
 
-Service mesh (Istio, Cilium/eBPF), platform engineering, cloud cost engineering (FinOps), MLOps, zero trust/mTLS, CKS prep, multi-cloud & edge, GitOps at scale, and the final interview blitz. Not yet added — will follow the same structure as Phases 0–3 above.
+| Day | Week | Topic | Flag |
+|---|---|---|---|
+| [Day-110](Day-110/) | W19 | Istio Deep Dive | |
+| [Day-111](Day-111/) | W19 | Cilium & eBPF | ⚡ |
+| [Day-112](Day-112/) | W19 | Platform Engineering Concepts | |
+| [Day-113](Day-113/) | W19 | Crossplane & Self-service Infra | |
+| [Day-114](Day-114/) | W20 | Cloud Cost Engineering | ⚡ |
+| [Day-115](Day-115/) | W20 | Kubernetes Cost Optimisation | |
+| [Day-116](Day-116/) | W20 | MLOps Fundamentals | ⚡ |
+| [Day-117](Day-117/) | W20 | Model Serving & Kubeflow | ⚡ |
+| [Day-118](Day-118/) | W20 | Agentic AI Infrastructure | ⚡ |
+| [Day-119](Day-119/) | W21 | Zero Trust & mTLS | ⚡ |
+| [Day-120](Day-120/) | W21 | CKS Exam Prep | 📌 |
+| [Day-121-130](Day-121-130/) | W21-W22 | Multi-cloud & Edge | |
+| [Day-131-140](Day-131-140/) | W23-W24 | GitOps at Scale | |
+| [Day-141-150](Day-141-150/) | W25 | Final Interview Blitz | 📌 |
 
 ---
 
